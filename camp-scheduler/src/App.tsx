@@ -5,6 +5,7 @@ import dayGridPlugin from '@fullcalendar/daygrid';
 import GoogleSignIn from './components/GoogleSignIn';
 import Chat from './components/Chat';
 import { OAUTH_CONFIG } from './config/oauth';
+import logo from './assets/logo.png';
 
 function App() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -88,21 +89,29 @@ function App() {
 
   return (
     <div>
-      <h1 className="main-title">Peppy Calendar</h1>
-      
       {!accessToken ? (
-        <div className="signin-container">
-          <GoogleSignIn onSignIn={handleSignIn} onSignOut={handleSignOut} />
+        <div>
+          <div className="logo-container">
+            <img src={logo} alt="Peppy Calendar Logo" className="main-logo" />
+          </div>
+          <div className="signin-container">
+            <GoogleSignIn onSignIn={handleSignIn} onSignOut={handleSignOut} isSignedIn={false} />
+          </div>
         </div>
       ) : (
-        <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
-          <GoogleSignIn onSignIn={handleSignIn} onSignOut={handleSignOut} />
+        <div className="header-container">
+          <div className="logo-container">
+            <img src={logo} alt="Peppy Calendar Logo" className="main-logo" />
+          </div>
+          <div className="user-info-container">
+            <h2 className="welcome-message">Welcome, {userEmail}!</h2>
+            <GoogleSignIn onSignIn={handleSignIn} onSignOut={handleSignOut} isSignedIn={true} />
+          </div>
         </div>
       )}
       
       {accessToken && userEmail ? (
         <div>
-          <h2 className="welcome-message">Welcome, {userEmail}!</h2>
           
           {calendarError && (
             <div className="error-message">

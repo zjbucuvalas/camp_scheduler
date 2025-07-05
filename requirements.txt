@@ -1,0 +1,31 @@
+# Multi-Agent System Requirements
+
+# Core dependencies for LLM integration
+httpx>=0.25.0  # For async HTTP requests to LLM APIs
+
+# Google Generative AI for Gemini integration
+google-generativeai>=0.3.0
+
+# Optional: Enhanced logging and monitoring
+# rich>=13.0.0
+
+# Optional: Data processing capabilities
+# pandas>=1.5.0
+# numpy>=1.21.0
+
+# Optional: Web-based monitoring dashboard
+# fastapi>=0.100.0
+# uvicorn>=0.23.0
+
+# Optional: Persistent storage
+# sqlalchemy>=2.0.0
+# sqlite3  # Built-in
+
+# Optional: Advanced messaging
+# redis>=4.5.0
+# pika>=1.3.0  # RabbitMQ client
+
+# Optional: Official LLM client libraries (alternative to httpx)
+# openai>=1.0.0
+# anthropic>=0.3.0
+# cohere>=4.0.0 

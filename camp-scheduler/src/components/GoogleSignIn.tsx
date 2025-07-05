@@ -4,9 +4,10 @@ import { OAUTH_CONFIG, buildOAuthUrl } from '../config/oauth';
 interface GoogleSignInProps {
   onSignIn: (accessToken: string, userEmail: string) => void;
   onSignOut: () => void;
+  isSignedIn?: boolean;
 }
 
-const GoogleSignIn: React.FC<GoogleSignInProps> = ({ onSignIn, onSignOut }) => {
+const GoogleSignIn: React.FC<GoogleSignInProps> = ({ onSignIn, onSignOut, isSignedIn: propIsSignedIn }) => {
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -123,8 +124,10 @@ const GoogleSignIn: React.FC<GoogleSignInProps> = ({ onSignIn, onSignOut }) => {
     );
   }
 
+  const effectiveIsSignedIn = propIsSignedIn !== undefined ? propIsSignedIn : isSignedIn;
+
   return (
-    <div style={{ padding: isSignedIn ? '0' : '20px', textAlign: 'center' }}>
+    <div style={{ padding: effectiveIsSignedIn ? '0' : '20px', textAlign: 'center' }}>
       {error && (
         <div style={{ 
           color: 'red', 
@@ -138,7 +141,7 @@ const GoogleSignIn: React.FC<GoogleSignInProps> = ({ onSignIn, onSignOut }) => {
         </div>
       )}
       
-      {!isSignedIn ? (
+      {!effectiveIsSignedIn ? (
         <div>
           <h3>Google Calendar Access</h3>
           <p>Sign in with your Google account to view your calendar events.</p>
