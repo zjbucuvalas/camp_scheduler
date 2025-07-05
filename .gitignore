@@ -28,3 +28,5 @@ env/
 .DS_Store
 Thumbs.db
 
+# Large assets
+camp-scheduler/src/assets/logo.png
