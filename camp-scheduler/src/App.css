@@ -226,6 +226,14 @@
   text-shadow: none;
 }
 
+.chat-subtitle {
+  color: #64748b;
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+  font-style: italic;
+  font-weight: 400;
+}
+
 .chat-user-info {
   color: #64748b;
   font-size: 0.9rem;

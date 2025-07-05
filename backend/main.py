@@ -4,10 +4,15 @@ from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import json
 import logging
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv("../.env")
 
 # Import the existing AI agent system
 import sys
@@ -16,6 +21,7 @@ from agent import MessageBroker, Message
 from ai_agent import AIAgent, AIContext
 from llm_integration import create_gemini_config, ProductionAIAgent, LLMProvider, LLMConfig
 from camp_agent import CampAgent
+from calendar_agent import CalendarAgent
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,6 +31,7 @@ logger = logging.getLogger(__name__)
 broker = None
 scheduling_agent = None
 camp_agent = None
+calendar_agent = None
 
 class ChatMessage(BaseModel):
     message: str
@@ -35,6 +42,18 @@ class ChatResponse(BaseModel):
     response: str
     context_id: str
     timestamp: str
+
+class CalendarEventRequest(BaseModel):
+    title: str
+    start_datetime: str
+    end_datetime: Optional[str] = None
+    description: Optional[str] = ""
+    location: Optional[str] = ""
+
+class CalendarEventResponse(BaseModel):
+    success: bool
+    event_info: Optional[str] = None
+    message: str
 
 class SchedulingAssistant(ProductionAIAgent):
     """Specialized scheduling assistant agent powered by Gemini"""
@@ -51,6 +70,8 @@ Key capabilities:
 - Provide reminders and scheduling best practices
 
 IMPORTANT: When users ask ANY questions about summer camps, you MUST delegate to the CampAgent. Do not try to answer camp questions yourself.
+
+IMPORTANT: When users ask to schedule, add, or create calendar events, you MUST delegate to the CalendarAgent. Do not try to create calendar events yourself.
 
 Communication style:
 - Be friendly, professional, and proactive
@@ -100,10 +121,35 @@ Remember to be conversational and helpful while maintaining focus on calendar an
         message_lower = message.lower()
         return any(keyword in message_lower for keyword in camp_keywords)
     
+    def _is_calendar_request(self, message: str) -> bool:
+        """Check if the message is a calendar/scheduling request"""
+        calendar_keywords = [
+            'schedule', 'add to calendar', 'create event', 'book', 'appointment',
+            'meeting', 'add event', 'calendar', 'remind me', 'set reminder',
+            'plan', 'organize', 'time slot', 'availability', 'busy', 'free time',
+            'block time', 'reserve', 'pencil in', 'put on calendar', 'add to schedule',
+            'schedule for', 'book for', 'set up meeting', 'arrange', 'coordinate time',
+            'when can we', 'what time', 'available', 'schedule this', 'add this to',
+            'put this on', 'calendar event', 'calendar entry', 'save the date',
+            'mark calendar', 'schedule reminder', 'set appointment', 'book appointment',
+            'camp registration', 'enroll', 'sign up for', 'register for camp',
+            'camp dates', 'camp schedule', 'camp session', 'camp week'
+        ]
+        
+        message_lower = message.lower()
+        return any(keyword in message_lower for keyword in calendar_keywords)
+    
     async def process_chat_message(self, message: str, user_email: str = None, context_id: str = None) -> tuple[str, str]:
         """Process a chat message and return response with context ID"""
         try:
-            # Check if this is a camp-related question
+            # Check if this is a calendar/scheduling request FIRST (priority over camp questions)
+            if self._is_calendar_request(message) and calendar_agent:
+                logger.info(f"Delegating calendar request to CalendarAgent: {message[:50]}...")
+                # Delegate to calendar agent
+                calendar_response = await calendar_agent.process_calendar_request(message, context_id)
+                return calendar_response, context_id or f"calendar_{hash(message)}"
+            
+            # Check if this is a camp-related question (informational)
             if self._is_camp_question(message) and camp_agent:
                 logger.info(f"Delegating camp question to CampAgent: {message[:50]}...")
                 # Delegate to camp agent
@@ -136,7 +182,7 @@ Remember to be conversational and helpful while maintaining focus on calendar an
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage the lifespan of the FastAPI application"""
-    global broker, scheduling_agent, camp_agent
+    global broker, scheduling_agent, camp_agent, calendar_agent
     
     # Startup
     try:
@@ -161,6 +207,9 @@ async def lifespan(app: FastAPI):
         # Create the camp agent
         camp_agent = CampAgent(broker, gemini_config)
         
+        # Create the calendar agent
+        calendar_agent = CalendarAgent(broker, gemini_config)
+        
         # Initialize the agents
         await scheduling_agent.initialize()
         await scheduling_agent.start()
@@ -168,7 +217,10 @@ async def lifespan(app: FastAPI):
         await camp_agent.initialize()
         await camp_agent.start()
         
-        logger.info("Scheduling assistant and camp agent started successfully")
+        await calendar_agent.initialize()
+        await calendar_agent.start()
+        
+        logger.info("Scheduling assistant, camp agent, and calendar agent started successfully")
         
     except Exception as e:
         logger.error(f"Failed to start backend: {e}")
@@ -185,6 +237,9 @@ async def lifespan(app: FastAPI):
         
         if camp_agent:
             await camp_agent.stop()
+        
+        if calendar_agent:
+            await calendar_agent.stop()
         
         logger.info("Backend shut down successfully")
         
@@ -240,14 +295,16 @@ async def health_check():
         "timestamp": datetime.now().isoformat(),
         "scheduling_agent_available": scheduling_agent is not None,
         "camp_agent_available": camp_agent is not None,
+        "calendar_agent_available": calendar_agent is not None,
         "scheduling_agent_status": scheduling_agent.get_production_status() if scheduling_agent else None,
-        "camp_agent_status": camp_agent.get_production_status() if camp_agent else None
+        "camp_agent_status": camp_agent.get_production_status() if camp_agent else None,
+        "calendar_agent_status": calendar_agent.get_calendar_status() if calendar_agent else None
     }
 
 @app.get("/api/agent/status")
 async def get_agent_status():
     """Get the current status of the agents"""
-    if not scheduling_agent and not camp_agent:
+    if not scheduling_agent and not camp_agent and not calendar_agent:
         raise HTTPException(status_code=404, detail="No agents found")
     
     status = {}
@@ -255,8 +312,141 @@ async def get_agent_status():
         status["scheduling_agent"] = scheduling_agent.get_production_status()
     if camp_agent:
         status["camp_agent"] = camp_agent.get_production_status()
+    if calendar_agent:
+        status["calendar_agent"] = calendar_agent.get_calendar_status()
     
     return status
+
+@app.post("/api/calendar/add-event", response_model=CalendarEventResponse)
+async def add_calendar_event(event_request: CalendarEventRequest):
+    """Add an event to the calendar"""
+    try:
+        if not calendar_agent:
+            raise HTTPException(status_code=500, detail="Calendar agent not available")
+        
+        # Add the event using the calendar agent
+        result = await calendar_agent.add_calendar_event(
+            title=event_request.title,
+            start_datetime=event_request.start_datetime,
+            end_datetime=event_request.end_datetime,
+            description=event_request.description,
+            location=event_request.location
+        )
+        
+        return CalendarEventResponse(
+            success=result["success"],
+            event_info=result["event_info"],
+            message=result["message"]
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in add calendar event endpoint: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/api/calendar/status")
+async def get_calendar_status():
+    """Get the current status of the calendar agent"""
+    if not calendar_agent:
+        raise HTTPException(status_code=404, detail="Calendar agent not found")
+    
+    return calendar_agent.get_calendar_status()
+
+@app.get("/api/calendar/auth-url")
+async def get_calendar_auth_url():
+    """Get the Google Calendar authorization URL for OAuth flow"""
+    if not calendar_agent:
+        raise HTTPException(status_code=404, detail="Calendar agent not found")
+    
+    auth_url = calendar_agent.get_auth_url()
+    if not auth_url:
+        raise HTTPException(status_code=500, detail="Unable to generate authorization URL")
+    
+    return {"auth_url": auth_url}
+
+@app.get("/api/calendar/oauth-callback")
+async def handle_calendar_oauth_callback_get(code: str = None, state: str = None):
+    """Handle the OAuth callback with authorization code (GET request from Google)"""
+    if not calendar_agent:
+        raise HTTPException(status_code=404, detail="Calendar agent not found")
+    
+    if not code:
+        raise HTTPException(status_code=400, detail="Authorization code is required")
+    
+    success = await calendar_agent.handle_oauth_callback(code)
+    if success:
+        # Return HTML page that closes the popup and notifies the parent window
+        html_content = """
+        <html>
+        <head><title>Authorization Successful</title></head>
+        <body>
+            <h1>✅ Calendar Authorization Successful!</h1>
+            <p>You can close this window and try creating your calendar event again.</p>
+            <script>
+                // Notify parent window and close popup
+                console.log('OAuth callback received, attempting to close popup...');
+                
+                // Try multiple methods to notify parent and close popup
+                function notifyAndClose() {
+                    if (window.opener && !window.opener.closed) {
+                        console.log('Notifying parent window...');
+                        window.opener.postMessage({
+                            type: 'OAUTH_SUCCESS',
+                            source: 'calendar_auth'
+                        }, '*');
+                        
+                        // Small delay to ensure message is sent
+                        setTimeout(() => {
+                            window.close();
+                        }, 100);
+                    } else if (window.parent && window.parent !== window) {
+                        console.log('Notifying parent frame...');
+                        window.parent.postMessage({
+                            type: 'OAUTH_SUCCESS',
+                            source: 'calendar_auth'
+                        }, '*');
+                        
+                        setTimeout(() => {
+                            window.close();
+                        }, 100);
+                    } else {
+                        console.log('No parent found, redirecting...');
+                        // If not in popup, redirect back to the app
+                        window.location.href = 'http://localhost:5173';
+                    }
+                }
+                
+                // Call immediately and also after a short delay as backup
+                notifyAndClose();
+                setTimeout(notifyAndClose, 500);
+                
+                // Auto-close after 3 seconds as fallback
+                setTimeout(() => {
+                    console.log('Auto-closing popup...');
+                    window.close();
+                }, 3000);
+            </script>
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=html_content)
+    else:
+        raise HTTPException(status_code=500, detail="OAuth callback handling failed")
+
+@app.post("/api/calendar/oauth-callback")
+async def handle_calendar_oauth_callback_post(callback_data: dict):
+    """Handle the OAuth callback with authorization code (POST request for programmatic access)"""
+    if not calendar_agent:
+        raise HTTPException(status_code=404, detail="Calendar agent not found")
+    
+    authorization_code = callback_data.get("code")
+    if not authorization_code:
+        raise HTTPException(status_code=400, detail="Authorization code is required")
+    
+    success = await calendar_agent.handle_oauth_callback(authorization_code)
+    if success:
+        return {"success": True, "message": "Calendar authorization completed successfully"}
+    else:
+        raise HTTPException(status_code=500, detail="OAuth callback handling failed")
 
 if __name__ == "__main__":
     import uvicorn

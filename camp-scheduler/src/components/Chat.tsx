@@ -54,7 +54,7 @@ const Chat: React.FC<ChatProps> = ({ userEmail }) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 1,
-      text: "Hello! I'm your scheduling assistant. I'm here to help you with your calendar and scheduling needs for this summer. What can I assist you with today?",
+      text: "Hi there! I'm Stephie, your family concierge. I'm here to help you with your calendar, scheduling, and summer planning needs. What can I assist you with today?",
       sender: 'assistant',
       timestamp: new Date(),
     },
@@ -62,6 +62,7 @@ const Chat: React.FC<ChatProps> = ({ userEmail }) => {
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [contextId, setContextId] = useState<string | null>(null);
+  const [isAuthenticatingCalendar, setIsAuthenticatingCalendar] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -72,8 +73,199 @@ const Chat: React.FC<ChatProps> = ({ userEmail }) => {
     scrollToBottom();
   }, [messages]);
 
+  // Function to handle calendar OAuth authorization
+  const handleCalendarAuth = async (authUrl: string, originalMessage: string) => {
+    try {
+      setIsAuthenticatingCalendar(true);
+      
+      // Add a message to show we're handling authorization
+      const authMessage: Message = {
+        id: messages.length + 10,
+        text: "🔐 I'll handle the calendar authorization for you automatically...",
+        sender: 'assistant',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, authMessage]);
+
+      // Open OAuth in a popup window
+      const popup = window.open(
+        authUrl,
+        'calendar-auth',
+        'width=500,height=600,scrollbars=yes,resizable=yes'
+      );
+
+      // Listen for the OAuth callback
+      const checkClosed = setInterval(() => {
+        if (popup?.closed) {
+          clearInterval(checkClosed);
+          // Check if we got the authorization code from the popup
+          const urlParams = new URLSearchParams(popup?.location?.search || '');
+          const authCode = urlParams.get('code');
+          
+          if (authCode) {
+            handleOAuthCallback(authCode, originalMessage);
+          } else {
+            setIsAuthenticatingCalendar(false);
+            const errorMessage: Message = {
+              id: messages.length + 11,
+              text: "❌ Calendar authorization was cancelled or failed. Please try your calendar request again.",
+              sender: 'assistant',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, errorMessage]);
+          }
+        }
+      }, 1000);
+
+      // Handle message from popup (if using postMessage)
+      const handleMessage = (event: MessageEvent) => {
+        if (event.origin !== window.location.origin) return;
+        
+        if (event.data.type === 'OAUTH_SUCCESS' && event.data.source === 'calendar_auth') {
+          popup?.close();
+          clearInterval(checkClosed);
+          handleOAuthSuccess(originalMessage);
+          window.removeEventListener('message', handleMessage);
+        } else if (event.data.type === 'OAUTH_ERROR') {
+          popup?.close();
+          clearInterval(checkClosed);
+          setIsAuthenticatingCalendar(false);
+          const errorMessage: Message = {
+            id: messages.length + 11,
+            text: "❌ Calendar authorization failed. Please try your calendar request again.",
+            sender: 'assistant',
+            timestamp: new Date(),
+          };
+          setMessages(prev => [...prev, errorMessage]);
+          window.removeEventListener('message', handleMessage);
+        }
+      };
+
+      window.addEventListener('message', handleMessage);
+
+    } catch (error) {
+      console.error('Error handling calendar auth:', error);
+      setIsAuthenticatingCalendar(false);
+      const errorMessage: Message = {
+        id: messages.length + 11,
+        text: "❌ Error with calendar authorization. Please try again.",
+        sender: 'assistant',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    }
+  };
+
+  // Function to handle OAuth callback
+  const handleOAuthCallback = async (authCode: string, originalMessage: string) => {
+    try {
+      // Send the authorization code to the backend
+      const response = await fetch('http://localhost:8000/api/calendar/oauth-callback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ code: authCode }),
+      });
+
+      if (response.ok) {
+        const successMessage: Message = {
+          id: messages.length + 12,
+          text: "✅ Calendar access authorized successfully! Let me process your calendar request now...",
+          sender: 'assistant',
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, successMessage]);
+
+        // Retry the original calendar request
+        setTimeout(() => {
+          retryCalendarRequest(originalMessage);
+        }, 1000);
+      } else {
+        throw new Error('OAuth callback failed');
+      }
+    } catch (error) {
+      console.error('Error in OAuth callback:', error);
+      const errorMessage: Message = {
+        id: messages.length + 12,
+        text: "❌ Failed to complete calendar authorization. Please try your request again.",
+        sender: 'assistant',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsAuthenticatingCalendar(false);
+    }
+  };
+
+  // Function to handle OAuth success (when OAuth completes server-side)
+  const handleOAuthSuccess = async (originalMessage: string) => {
+    try {
+      const successMessage: Message = {
+        id: messages.length + 12,
+        text: "✅ Calendar access authorized successfully! Let me process your calendar request now...",
+        sender: 'assistant',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, successMessage]);
+
+      // Retry the original calendar request
+      setTimeout(() => {
+        retryCalendarRequest(originalMessage);
+      }, 1000);
+    } catch (error) {
+      console.error('Error in OAuth success handler:', error);
+      const errorMessage: Message = {
+        id: messages.length + 12,
+        text: "❌ Failed to complete calendar authorization. Please try your request again.",
+        sender: 'assistant',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsAuthenticatingCalendar(false);
+    }
+  };
+
+  // Function to retry the original calendar request after authorization
+  const retryCalendarRequest = async (originalMessage: string) => {
+    try {
+      const response = await fetch('http://localhost:8000/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: originalMessage,
+          user_email: userEmail,
+          context_id: contextId,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const assistantResponse: Message = {
+          id: messages.length + 13,
+          text: data.response,
+          sender: 'assistant',
+          timestamp: new Date(data.timestamp),
+        };
+        setMessages(prev => [...prev, assistantResponse]);
+      }
+    } catch (error) {
+      console.error('Error retrying calendar request:', error);
+      const errorMessage: Message = {
+        id: messages.length + 13,
+        text: "❌ Error processing your calendar request. Please try again.",
+        sender: 'assistant',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    }
+  };
+
   const handleSendMessage = async () => {
-    if (inputMessage.trim() === '' || isLoading) return;
+    if (inputMessage.trim() === '' || isLoading || isAuthenticatingCalendar) return;
 
     const newMessage: Message = {
       id: messages.length + 1,
@@ -112,14 +304,33 @@ const Chat: React.FC<ChatProps> = ({ userEmail }) => {
         setContextId(data.context_id);
       }
 
-      const assistantResponse: Message = {
-        id: messages.length + 2,
-        text: data.response,
-        sender: 'assistant',
-        timestamp: new Date(data.timestamp),
-      };
-
-      setMessages(prev => [...prev, assistantResponse]);
+      // Check if the response contains an OAuth URL for calendar authorization
+      const responseText = data.response;
+      const oauthUrlMatch = responseText.match(/https:\/\/accounts\.google\.com\/o\/oauth2\/auth\?[^\s\n]+/);
+      
+      if (oauthUrlMatch && responseText.includes('calendar')) {
+        // Handle OAuth automatically instead of showing the URL to the user
+        const authUrl = oauthUrlMatch[0];
+        handleCalendarAuth(authUrl, currentInput);
+        
+        // Show a user-friendly message instead of the OAuth URL
+        const assistantResponse: Message = {
+          id: messages.length + 2,
+          text: "I can help you add that to your calendar! Let me just get permission to access your Google Calendar first...",
+          sender: 'assistant',
+          timestamp: new Date(data.timestamp),
+        };
+        setMessages(prev => [...prev, assistantResponse]);
+      } else {
+        // Normal response handling
+        const assistantResponse: Message = {
+          id: messages.length + 2,
+          text: responseText,
+          sender: 'assistant',
+          timestamp: new Date(data.timestamp),
+        };
+        setMessages(prev => [...prev, assistantResponse]);
+      }
     } catch (error) {
       console.error('Error sending message:', error);
       const errorMessage: Message = {
@@ -148,7 +359,10 @@ const Chat: React.FC<ChatProps> = ({ userEmail }) => {
   return (
     <div className="chat-container">
       <div className="chat-header">
-        <h3>💬 Calendar Assistant</h3>
+        <div>
+          <h3>💬 Stephie</h3>
+          <div className="chat-subtitle">your family concierge</div>
+        </div>
         {userEmail && (
           <div className="chat-user-info">
             Chatting as {userEmail.split('@')[0]}
@@ -168,7 +382,7 @@ const Chat: React.FC<ChatProps> = ({ userEmail }) => {
             </div>
           </div>
         ))}
-        {isLoading && (
+        {(isLoading || isAuthenticatingCalendar) && (
           <div className="chat-message assistant-message">
             <div className="message-content">
               <div className="message-text">
@@ -177,6 +391,11 @@ const Chat: React.FC<ChatProps> = ({ userEmail }) => {
                   <span></span>
                   <span></span>
                 </div>
+                {isAuthenticatingCalendar && (
+                  <div style={{ marginTop: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                    Authorizing calendar access...
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -191,26 +410,16 @@ const Chat: React.FC<ChatProps> = ({ userEmail }) => {
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="Ask me about your calendar events, scheduling, or anything else..."
+            placeholder="Ask me about family scheduling, summer camps, or calendar planning..."
             rows={2}
+            disabled={isAuthenticatingCalendar}
           />
           <button
             className="chat-send-button"
             onClick={handleSendMessage}
-            disabled={inputMessage.trim() === '' || isLoading}
+            disabled={inputMessage.trim() === '' || isLoading || isAuthenticatingCalendar}
           >
-            {isLoading ? (
-              <div className="loading-spinner">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 12a9 9 0 11-6.219-8.56"/>
-                </svg>
-              </div>
-            ) : (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="22" y1="2" x2="11" y2="13"></line>
-                <polygon points="22,2 15,22 11,13 2,9"></polygon>
-              </svg>
-            )}
+            {isLoading || isAuthenticatingCalendar ? '...' : 'Send'}
           </button>
         </div>
       </div>

@@ -21,7 +21,17 @@ export GEMINI_API_KEY="your-api-key-here"
 pip install -r requirements.txt
 ```
 
-### 3. Start the Server
+### 3. Set up Calendar Agent (Optional)
+
+For calendar functionality, you'll need to configure Google Calendar API access:
+
+1. Follow the detailed setup guide in `CALENDAR_SETUP.md`
+2. Download OAuth credentials from Google Cloud Console
+3. Place `credentials.json` in the `credentials/` directory
+
+**Note**: The server will start without calendar credentials, but calendar features will be disabled.
+
+### 4. Start the Server
 
 #### Option A: Using the start script (recommended)
 ```bash
@@ -35,7 +45,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 The server will start on `http://localhost:8000`
 
-### 4. Start the React Frontend
+### 5. Start the React Frontend
 
 In a separate terminal, go to the camp-scheduler directory and start the React app:
 ```bash
@@ -54,6 +64,10 @@ The React app will be available at `http://localhost:5173`
 - **GET** `/api/agent/status` - Get current agent status
 - **GET** `/docs` - Interactive API documentation
 
+### Calendar API Endpoints
+- **POST** `/api/calendar/add-event` - Add events directly to Google Calendar
+- **GET** `/api/calendar/status` - Check calendar agent status and authentication
+
 ## 🤖 Features
 
 ### Scheduling Assistant Capabilities
@@ -63,6 +77,14 @@ The React app will be available at `http://localhost:5173`
 - **Conflict Resolution**: Help resolve scheduling conflicts
 - **Event Planning**: Support for planning and organizing events
 - **Reminders**: Provide scheduling reminders and best practices
+
+### Calendar Agent Features
+- **Google Calendar Integration**: Direct integration with Google Calendar API
+- **Automatic Event Creation**: Creates calendar events from natural language requests
+- **Camp Registration**: Handles summer camp registration and scheduling
+- **Smart Delegation**: Automatically routes calendar requests from the chat interface
+- **Date/Time Parsing**: Understands various date and time formats
+- **Event Validation**: Ensures all required information is present before creating events
 
 ### Technical Features
 - **No Token Limit**: Configured with high token limits (8192) to avoid restrictions
@@ -86,13 +108,20 @@ The system is configured with:
 ```
 backend/
 ├── main.py              # FastAPI application
+├── camp_agent.py        # Camp information agent
+├── calendar_agent.py    # Google Calendar integration agent
 ├── requirements.txt     # Python dependencies
 ├── start_server.py     # Server startup script
+├── CALENDAR_SETUP.md    # Calendar setup guide
+├── credentials/         # Google Calendar API credentials
+│   └── README.md       # Credential setup instructions
 └── README.md           # This file
 ```
 
 ### Key Components
 - **SchedulingAssistant**: Specialized AI agent for scheduling tasks
+- **CampAgent**: Provides information about summer camps in Columbus
+- **CalendarAgent**: Handles Google Calendar integration and event creation
 - **Chat API**: RESTful API for frontend communication
 - **Context Management**: Maintains conversation state
 - **Error Handling**: Comprehensive error management
@@ -109,6 +138,28 @@ curl http://localhost:8000/api/health
 curl -X POST http://localhost:8000/api/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "Help me schedule a meeting for tomorrow at 2pm", "user_email": "test@example.com"}'
+```
+
+### Test Calendar Integration
+```bash
+# Check calendar agent status
+curl http://localhost:8000/api/calendar/status
+
+# Add event directly to calendar
+curl -X POST http://localhost:8000/api/calendar/add-event \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Team Meeting",
+    "start_datetime": "2024-07-15 14:00:00",
+    "end_datetime": "2024-07-15 15:00:00",
+    "description": "Weekly team sync",
+    "location": "Conference Room A"
+  }'
+
+# Test calendar request via chat
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Add a summer camp session to my calendar for July 15-19, 9am to 3pm daily"}'
 ```
 
 ## 🐛 Troubleshooting
@@ -129,6 +180,16 @@ curl -X POST http://localhost:8000/api/chat \
 4. **"Scheduling assistant not available"**
    - Check if the Google API key is valid
    - Look at the server logs for initialization errors
+
+5. **"Calendar agent not available"**
+   - Follow the setup guide in `CALENDAR_SETUP.md`
+   - Ensure `credentials.json` is in the `credentials/` directory
+   - Check that Google Calendar API is enabled in Google Cloud Console
+
+6. **"Authentication failed" for calendar**
+   - Delete `credentials/token.pickle` to force re-authentication
+   - Verify OAuth consent screen is configured correctly
+   - Check that your Google account has calendar access
 
 ### Logs
 The server provides detailed logging. Check the console output for:
